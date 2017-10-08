@@ -252,7 +252,7 @@ copyByFdError:
 void Copy(const FunctionCallbackInfo<Value>& incoming) {
     Args args(incoming);
 
-    int in = open(args.Source, O_RDONLY | O_BINARY);
+    int out, in = open(args.Source, O_RDONLY | O_BINARY);
     if (in < 0) goto copyByPathError;
 
     struct stat st;
@@ -264,7 +264,7 @@ void Copy(const FunctionCallbackInfo<Value>& incoming) {
     }
 
     // Open target
-    int out = open(args.Destination, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, st.st_mode);
+    out = open(args.Destination, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, st.st_mode);
     if (out < 0) {
         close(in);
         goto copyByPathError;
@@ -282,7 +282,7 @@ copyByPathError:
 void Move(const FunctionCallbackInfo<Value>& incoming) {
     Args args(incoming);
 
-    int in = open(args.Source, O_RDONLY | O_BINARY);
+    int out, in = open(args.Source, O_RDONLY | O_BINARY);
     if (in < 0) goto moveError;
 
     struct stat in_stats;
@@ -294,7 +294,7 @@ void Move(const FunctionCallbackInfo<Value>& incoming) {
     }
 
     // Open target
-    int out = open(args.Destination, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, in_stats.st_mode);
+    out = open(args.Destination, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, in_stats.st_mode);
     if (out < 0) {
         close(in);
         goto moveError;
@@ -309,24 +309,25 @@ void Move(const FunctionCallbackInfo<Value>& incoming) {
         goto moveError;
     }
 
-    const ssize_t inputSize = in_stats.st_size;
+    {
+        const ssize_t inputSize = in_stats.st_size;
+        if (in_stats.st_dev == out_stats.st_dev) {
+            close(in);
+            close(out);
 
-    if (in_stats.st_dev == out_stats.st_dev) {
-        close(in);
-        close(out);
+            // These files are on the same device; it would
+            // be much quicker to just rename the file
+            remove(args.Destination);
+            rename(args.Source, args.Destination);
 
-        // These files are on the same device; it would
-        // be much quicker to just rename the file
-        remove(args.Destination);
-        rename(args.Source, args.Destination);
-
-        SendProgressUpdate(args, (double) inputSize, (double) inputSize);
-        SendComplete(args);
-    }
-    else {
-        // They're on different devices.  We'll need to
-        // do this as a copy followed by a remove.
-        Copy(in, out, inputSize, args, /* removeWhenDone: */ true);
+            SendProgressUpdate(args, (double) inputSize, (double) inputSize);
+            SendComplete(args);
+        }
+        else {
+            // They're on different devices.  We'll need to
+            // do this as a copy followed by a remove.
+            Copy(in, out, inputSize, args, /* removeWhenDone: */ true);
+        }
     }
 
     return;
